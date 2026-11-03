@@ -1,0 +1,17 @@
+name = "spec-derive"
+defaultTargets = ["SpecDerive", "emit", "oracle"]
+
+[[lean_lib]]
+name = "SpecDerive"
+
+[[lean_exe]]
+name = "emit"
+root = "Emit"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "oracle"
+root = "Oracle"
+
+[[lean_lib]]
+name = "RejectCases"
