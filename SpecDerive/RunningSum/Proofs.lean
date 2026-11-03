@@ -20,15 +20,17 @@ theorem inRange_iff (e : Entry) : inRange e = true ↔ InRange e := by
 theorem checkFrom_iff (e : Entry) (t : List Entry) :
     checkFrom e t = true ↔ Consistent (e :: t) ∧ ∀ y ∈ t, InRange y := by
   induction t generalizing e with
-  | nil => simp [checkFrom, Consistent, reference]
+  | nil =>
+    simp only [checkFrom, beq_iff_eq, Consistent, reference, Int.add_zero, and_true,
+      List.not_mem_nil, false_implies, implies_true]
   | cons e' t ih =>
     simp only [checkFrom, Bool.and_eq_true, beq_iff_eq, inRange_iff, ih, Consistent, reference,
       List.forall_mem_cons]
     constructor
     · rintro ⟨hr, hc, ⟨hc', hct⟩, hall⟩
-      exact ⟨⟨by omega, hc', hct⟩, hr, hall⟩
+      exact ⟨⟨by rw [hc, hc'], hc', hct⟩, hr, hall⟩
     · rintro ⟨⟨hc, hc', hct⟩, hr, hall⟩
-      exact ⟨hr, by omega, ⟨hc', hct⟩, hall⟩
+      exact ⟨hr, by rw [hc, hc'], ⟨hc', hct⟩, hall⟩
 
 theorem check_sound : CheckSound := by
   unfold CheckSound Invariant ValuesBounded
@@ -69,23 +71,23 @@ theorem reference_le (s : List Entry)
     -(1000000000000 * (s.length : Int)) ≤ reference s ∧
       reference s ≤ 1000000000000 * (s.length : Int) := by
   induction s with
-  | nil => simp [reference]
+  | nil => simp only [reference, List.length_nil]; constructor <;> omega
   | cons e t ih =>
     have he := h e (List.mem_cons_self ..)
     have ht := ih (fun x hx => h x (List.mem_cons_of_mem _ hx))
     simp only [reference, List.length_cons]
-    omega
+    constructor <;> omega
 
 theorem reference_fits : ReferenceFits := by
   unfold ReferenceFits Bounded Fits minInt maxInt
   intro s ⟨hl, hm⟩
   have := reference_le s (fun e he => ⟨(hm e he).1, (hm e he).2.1⟩)
-  omega
+  constructor <;> omega
 
 theorem check_site_fits : CheckSiteFits := by
   unfold CheckSiteFits InRange Fits minInt maxInt
   intro e e' h1 h2
-  omega
+  constructor <;> omega
 
 /-! ## Keeping the invariant by construction: `push` -/
 
@@ -137,7 +139,7 @@ theorem plan_values_bounded (s : List Entry) (hs : ValuesBounded s) :
     have := hs e (List.mem_cons_self ..)
     simp only [InRange] at this
     simp only [plan]
-    omega
+    constructor <;> omega
 
 theorem push_values_bounded : PushValuesBounded := by
   unfold PushValuesBounded ValuesBounded InRange
@@ -152,7 +154,7 @@ theorem push_site_fits : PushSiteFits := by
   unfold PushSiteFits Fits minInt maxInt
   intro x s hs h1 h2
   have := plan_values_bounded s hs
-  omega
+  constructor <;> omega
 
 theorem push_preserves : PushPreserves := by
   unfold PushPreserves Invariant
@@ -164,6 +166,6 @@ theorem reference_fits_inv : ReferenceFitsInv := by
   intro s ⟨hinv, hs⟩
   have := plan_values_bounded s hs
   rw [← plan_correct s hinv]
-  omega
+  constructor <;> omega
 
 end RunningSum
