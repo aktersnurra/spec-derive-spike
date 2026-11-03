@@ -9,6 +9,8 @@ import SpecDerive
 
 Input line formats (space-separated tokens):
 * `running_sum`: entries newest first, each `x:cum`. An empty line is the empty list.
+* `sorted_lookup`: the query key, then entries `key:value`. Results print as `none` or
+  `some <v>`.
 -/
 
 def words (line : String) : List String := (line.splitOn " ").filter (· ≠ "")
@@ -21,8 +23,19 @@ def runningSum (line : String) : Option String := do
     pure ({ x, cum } : RunningSum.Entry)
   pure s!"{RunningSum.reference s} {RunningSum.checkInvariant s} {decide (RunningSum.Bounded s)}"
 
+def sortedLookup (line : String) : Option String := do
+  let k :: toks := words line | none
+  let k ← k.toInt?
+  let s ← toks.mapM fun tok => do
+    let [key, value] ← ints tok | none
+    pure ({ key, value } : SortedLookup.Entry)
+  let r := match SortedLookup.reference s k with
+    | none => "none"
+    | some v => s!"some {v}"
+  pure s!"{r} {SortedLookup.checkInvariant s} {decide (SortedLookup.Bounded s k)}"
+
 def examples : List (String × (String → Option String)) :=
-  [("running_sum", runningSum)]
+  [("running_sum", runningSum), ("sorted_lookup", sortedLookup)]
 
 partial def loop (f : String → Option String) (stdin : IO.FS.Stream) (stdout : IO.FS.Stream)
     (lineNo : Nat) : IO UInt32 := do
