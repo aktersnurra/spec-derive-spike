@@ -16,6 +16,9 @@ A small spike that proves out a **workflow**, not a domain:
 5. **Differential-test** the generated OCaml against a Lean oracle executable, and `plan`/`run`
    against `reference`, on seeded, boundary-biased, partly invariant-violating inputs.
 6. **Benchmark** `reference` against `plan`, and also time `check_invariant` and `run`.
+7. **Keep the invariant true by construction** where it pays. `running_sum` has a generated,
+   proved invariant-preserving `push`, behind a small typed OCaml wrapper, so the O(1) plan
+   needs no check.
 
 Two examples, chosen to differ in structure:
 
@@ -53,9 +56,12 @@ RejectCases.lean             out-of-subset definitions the generator must refuse
 Oracle.lean                  Lean oracle exe: input line -> "<reference> <check> <bounded>"
 gen/                         generated OCaml (checked in, drift-checked)
 harness/                     generic: Subject signature, Pick, Diff driver, Bench
+wrapper/                     hand-written typed wrapper (`Running_sum_t`): private type, no-check total
 subjects/                    per-example adapters (input generators, oracle line format)
 test/difftest.ml             alcotest runner for the differential test
+test/push_seq.ml             push-sequence differential test (through the wrapper)
 bench/bench.ml               benchmark runner
+bench/workflow.ml            whole-workflow benchmark: push+total vs. reference vs. checked run
 scripts/                     verify, proof-gate, check-gen, test-reject, difftest, bench
 docs/adding-an-optimization.md   the procedure for a new triple
 ```
@@ -70,6 +76,9 @@ docs/adding-an-optimization.md   the procedure for a new triple
 | checker sound / complete | `check_sound`, `check_complete` | same |
 | `run = reference` (all inputs) | `run_correct` | `run_correct` |
 | OCaml `int` bounds | `bounded_tail`, `reference_fits`, `check_site_fits` | none needed (0 arithmetic sites) |
+| `push` preserves the invariant | `push_preserves` | none |
+| `push` semantics | `push_tail`, `push_reference`, `push_total` | none |
+| `push` stays in range | `push_values_bounded`, `push_site_fits`, `reference_fits_inv` | none |
 
 `#print axioms` (from `scripts/proof-gate.sh`, Lean 4.35.0); no `sorry`:
 
@@ -81,6 +90,13 @@ docs/adding-an-optimization.md   the procedure for a new triple
 'RunningSum.bounded_tail' depends on axioms: [propext, Quot.sound]
 'RunningSum.reference_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
 'RunningSum.check_site_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.push_preserves' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_tail' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_reference' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_total' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_values_bounded' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_site_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.reference_fits_inv' depends on axioms: [propext, Classical.choice, Quot.sound]
 'SortedLookup.plan_correct' depends on axioms: [propext, Quot.sound]
 'SortedLookup.check_sound' depends on axioms: [propext, Quot.sound]
 'SortedLookup.check_complete' depends on axioms: [propext, Quot.sound]
@@ -98,7 +114,10 @@ checker holds, and `run = reference` always.
 - The OCaml compiler and runtime. Also the Lean compiler, which builds the oracle: the oracle
   runs compiled Lean, not the kernel.
 - The hand-written adapters in `subjects/`: input generators and line formats.
-- The `Bounded` precondition. **It is not checked at runtime.** The generated `.mli` documents
+- The typed wrapper `wrapper/running_sum_t.ml` (6 lines). Its guarantee is that every `t` passed
+  through the generated checker or the generated `push`. That rests on the generator being
+  faithful, which is tested, not proved.
+- The `Bounded` precondition. **It is not checked at runtime**, including on `of_list` inputs. The generated `.mli` documents
   it, and the difftest asserts (through the oracle) that every generated input is inside it.
 - Coverage of arithmetic sites by `Fits` theorems. The generator counts the sites per function
   and prints them in the header, but matching each site to a theorem is done by review.
@@ -119,6 +138,28 @@ Lean `Int` is unbounded. OCaml `int` is 63-bit: `[-2^62, 2^62-1]`. The approach:
 
 It was clean for these examples: `omega` closes every bound with literal constants. The weak spot
 is that "one theorem per site" is a convention the tools don't enforce.
+
+## Keeping the invariant true by construction
+
+Checking on every call (`run`) cancels most of the plan's gain. So `running_sum` also has
+`push x s : Option (List Entry)`, which sets the new head's cached total to `x + plan s` in O(1).
+
+**Refusal instead of a precondition.** `push` returns `none` when |x| > 10^12 or the new total
+would leave ±10^15. Two reasons for not using a length precondition: a length bound can't be
+stated in the generator's subset (no `Nat`), and a caller precondition would need more trusted
+OCaml to enforce. Lists built by `push` can be longer than `Bounded`'s 1000 entries.
+`reference_fits_inv` proves that this doesn't matter under the invariant: every value
+`reference` computes is a cached total of some suffix.
+
+The generator needed one change: a per-example list of exported operations (`ops = ["push"]`).
+`push` itself translated with the existing subset. The OCaml wrapper (`Running_sum_t`) has a
+`private` type built only by `of_list` (which runs the generated checker) or `push`, and an
+unchecked O(1) `total`.
+
+The sequence test (`test/push_seq.ml`, run by `scripts/difftest.sh`) checks each push
+sequence against the Lean oracle: refusal count, total, reference, checker verdict and every
+entry. Its inputs include sequences that saturate exactly at ±10^15 and out-of-range amounts.
+Breaking the generated `push` result (`cum + 1`) or its bound (`<` → `<=`) makes it fail.
 
 ## Benchmarks
 
@@ -162,6 +203,44 @@ Where the plan does **not** win:
 Caveats: the numbers are from one machine and are noisy (a few IQRs exceed 10%). There is no CPU
 pinning or frequency control, and the clock is `Unix.gettimeofday`. Treat ratios under about 1.2x
 as noise.
+
+**running_sum, whole workflow** (`bench/workflow.ml`). Each path builds n entries from the same
+amounts:
+- push path: `push` then `total` (O(1), no check);
+- reference: a plain cons, then `reference`;
+- checked run: a cons with the total computed by hand, then `run` (O(n) check + plan).
+
+A. Build n entries, then query once:
+
+| n | push path ns | reference ns | checked run ns | push speedup | run speedup |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10.0 ±6% | 8.9 ±2% | 10.5 ±1% | 0.89x | 0.85x |
+| 10 | 67.3 ±8% | 64.7 ±3% | 61.9 ±5% | 0.96x | 1.05x |
+| 100 | 615.1 ±14% | 566.3 ±9% | 498.1 ±11% | 0.92x | 1.14x |
+| 1000 | 6372.1 ±7% | 6024.3 ±5% | 5513.7 ±9% | 0.95x | 1.09x |
+
+B. Query after every insert (n inserts, n queries):
+
+| n | push path ns | reference ns | checked run ns | push speedup | run speedup |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 10.5 ±1% | 11.4 ±4% | 12.5 ±8% | 1.09x | 0.91x |
+| 10 | 85.1 ±12% | 142.7 ±2% | 160.0 ±2% | 1.68x | 0.89x |
+| 100 | 705.1 ±13% | 10749.8 ±1% | 7956.1 ±1% | 15x | 1.35x |
+| 1000 | 7093.0 ±35% | 1052141.2 ±2% | 841140.7 ±1% | 148x | 1.25x |
+
+Per insert: `push` costs about 5–6 ns and 8 minor words (the `Some` box, the cons cell and the
+record); a plain cons costs about 4 ns and 6 words.
+
+Where it does **not** win:
+- **Build then query once (A).** By-construction is slightly slower (about 0.9–0.95x, within
+  noise). Each push pays for bounds checks and the `Some` allocation, and a single O(n)
+  `reference` query costs less than building the list does.
+- **n=1 in both scenarios.** Everything is near the harness floor.
+
+It pays when queries are frequent relative to inserts: 15x at n=100 and 148x at n=1000 in B,
+where the reference path is O(n²). The checked `run`'s 1.25–1.35x in B is the same
+tail-recursion artifact as above, not the plan. The push path's ±35% spread at n=1000 is GC
+noise (8000 words allocated per call), and the ratio is far outside it.
 
 One finding from the benchmark: the first `running_sum` checker, written as
 `checkInvariant (e' :: t)`, rebuilt a list cell on every step (3 words/entry in the generated

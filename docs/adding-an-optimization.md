@@ -3,6 +3,21 @@
 The exact steps used to add `sorted_lookup` (example 2). `<Ns>` is the Lean namespace
 (e.g. `SortedLookup`), `<stem>` the OCaml file stem (e.g. `sorted_lookup`).
 
+## 0. Decide how the invariant will hold
+
+A plan only pays if its invariant doesn't have to be re-checked on every call. In order of
+preference:
+
+1. **Keep it true by construction.** Add operations (e.g. `push`) proved to preserve it, and
+   generate them (step 7). No check is needed, and an insert stays O(1).
+2. **Check once where data comes from outside** (load, parse, network) with the generated
+   `checkInvariant`, through a typed wrapper (step 7).
+3. **Check on every call** (`run`). This is the fallback: the benchmarks show the O(n) check
+   cancels or reverses the gain (`sorted_lookup` `run` is about 0.5x the reference).
+
+The four-function shape below is still required in every case: `run` and the checker are what
+the differential test exercises.
+
 ## 1. Spec: `SpecDerive/<Ns>/Spec.lean`
 
 In `namespace <Ns>`, write only generator-subset code (see the docstring at the top of
@@ -81,8 +96,47 @@ The difftest requires that both the invariant-holding and the invariant-violatin
 exercised, and that the plan alone is wrong on at least one violating input (so the check is
 load-bearing). Commit `gen/` together with the spec change: CI's drift job fails otherwise.
 
+## 7. Optional: invariant-preserving operations and a typed wrapper
+
+Done for `running_sum` with `push`.
+
+1. **Spec.** Define the operation in the subset. If it can grow a value (a cached total grows
+   with every insert), have it return `Option` and refuse at the value bounds rather than take a
+   length precondition. A length bound can't be stated in the subset, and the caller can't
+   enforce it without extra trusted code. Range-check inputs *before* any arithmetic that uses
+   them. Statements:
+   - preservation: `Invariant s → op x s = some s' → Invariant s'`
+   - what the operation does, in reference terms (e.g. `reference s' = x + reference s`)
+   - the plan on the result (e.g. `plan s' = x + reference s`)
+   - values stay bounded (`ValuesBounded s → … → ValuesBounded s'`)
+   - one `Fits` per arithmetic site in the operation
+   - if results can exceed the `Bounded` length, that the other functions still fit on them
+     (`ReferenceFitsInv`)
+2. **Generate.** Add the name to the example's `ops` in `Emit.examples`, then run
+   `lake exe emit gen gen`. It is emitted and exported in the `.mli` like the fixed four.
+3. **Wrapper.** Write `wrapper/<stem>_t.ml{,i}`, a few lines of trusted code:
+   `type t = private entry list`, `of_list` (runs the generated checker), the generated
+   operations, and the plan on `t` with no check. The `.mli` states what the type guarantees:
+   every `t` passed through the generated checker or a generated preserving operation. It also
+   states what that rests on: proofs of the Lean model plus a tested, unproven generator, with
+   `Bounded` unchecked on `of_list` inputs.
+4. **Oracle.** Add a sequence mode: one line of operation arguments, applied from the empty
+   value. Print the refusal count, plan, reference, checker verdict and the full resulting value.
+5. **Test.** Write a sequence test like `test/push_seq.ml`, which builds through the wrapper.
+   Include sequences that hit each refusal limit exactly. Deliberately break the generated
+   operation's result and its bound once each, and confirm the test fails.
+6. **Benchmark the whole workflow** (`bench/workflow.ml`): build with operations then query,
+   against plain build + reference and against the checked `run`. Do this both for
+   query-once and query-after-every-insert, and report the per-operation cost and allocation.
+   For `running_sum`, by-construction loses slightly when building and querying once
+   (about 0.95x), and wins 148x at n=1000 when querying after every insert.
+
 ## What you should not need to touch
 
 `harness/*` (subject signature, picker, differential driver, benchmark), `test/difftest.ml`,
 `bench/bench.ml` and `scripts/*`. If you have to change them, the workflow did not generalize
 for your case: write down why.
+
+Exception: invariant-preserving operations (step 7) are sequences of operations, which the
+generic input → output `Diff` driver doesn't express. They needed a per-example sequence test
+and workflow benchmark, both reusing `Diff.oracle_outputs`, `Pick` and `Bench.measure`.

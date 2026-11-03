@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-03: keep the invariant true by construction
+- `RunningSum.push`: generated O(1) insert that refuses at the value bounds; proofs of
+  invariant preservation, semantics, value bounds, and `reference` fitting under the
+  invariant at any length.
+- `Emit.lean`: per-example exported operations (`ops`); `let` keeps the Lean binder name.
+- `wrapper/Running_sum_t`: typed wrapper (private type, checker-gated `of_list`, `push`,
+  unchecked `total`).
+- Oracle `running_sum_push` mode and push-sequence differential test; whole-workflow
+  benchmark; procedure doc gains the order of preference and step 7.
+
 ## 2026-11-03: spike complete
 - Lean spec and proofs for `running_sum` (cached running total) and `sorted_lookup`
   (early-exit lookup in a key-sorted list): plan correctness under the invariant, checker
