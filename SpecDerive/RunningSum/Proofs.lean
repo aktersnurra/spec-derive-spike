@@ -14,46 +14,37 @@ theorem plan_correct : PlanCorrect := by
   | nil => rfl
   | cons e t => simp only [plan, reference]; exact cum_of_invariant h
 
+theorem checkFrom_iff (e : Entry) (t : List Entry) : checkFrom e t = true ↔ Invariant (e :: t) := by
+  induction t generalizing e with
+  | nil => simp only [checkFrom, beq_iff_eq, Invariant, reference, and_true]; omega
+  | cons e' t ih =>
+    simp only [checkFrom, Bool.and_eq_true, beq_iff_eq, ih]
+    constructor
+    · intro ⟨h1, h2⟩
+      have := cum_of_invariant h2
+      refine ⟨?_, h2⟩
+      simp only [reference] at this ⊢
+      omega
+    · intro h
+      have h1 := cum_of_invariant h
+      have h2 := cum_of_invariant h.2
+      refine ⟨?_, h.2⟩
+      simp only [reference] at h1
+      omega
+
 theorem check_sound : CheckSound := by
   unfold CheckSound
-  intro s
-  induction s with
-  | nil => intro _; simp [Invariant]
-  | cons e t ih =>
-    intro h
-    cases t with
-    | nil =>
-      simp only [checkInvariant, beq_iff_eq] at h
-      simp only [Invariant, reference, and_true]
-      omega
-    | cons e' t' =>
-      simp only [checkInvariant, Bool.and_eq_true, beq_iff_eq] at h
-      have hinv := ih h.2
-      have h' := cum_of_invariant hinv
-      refine ⟨?_, hinv⟩
-      simp only [reference]
-      omega
+  intro s h
+  cases s with
+  | nil => trivial
+  | cons e t => exact (checkFrom_iff e t).mp h
 
 theorem check_complete : CheckComplete := by
   unfold CheckComplete
-  intro s
-  induction s with
-  | nil => intro _; rfl
-  | cons e t ih =>
-    intro h
-    have he := cum_of_invariant h
-    have ht : Invariant t := h.2
-    cases t with
-    | nil =>
-      simp only [reference] at he
-      simp only [checkInvariant, beq_iff_eq]
-      omega
-    | cons e' t' =>
-      have he' := cum_of_invariant ht
-      simp only [checkInvariant, Bool.and_eq_true, beq_iff_eq]
-      refine ⟨?_, ih ht⟩
-      simp only [reference] at he
-      omega
+  intro s h
+  cases s with
+  | nil => rfl
+  | cons e t => exact (checkFrom_iff e t).mpr h
 
 theorem run_correct : RunCorrect := by
   unfold RunCorrect run

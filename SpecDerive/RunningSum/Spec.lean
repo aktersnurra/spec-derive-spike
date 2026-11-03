@@ -27,12 +27,18 @@ def Invariant : List Entry → Prop
   | [] => True
   | e :: t => e.cum = reference (e :: t) ∧ Invariant t
 
-/-- Invariant checker, O(n): each `cum` is its `x` plus the next older entry's `cum`;
-the oldest entry's `cum` is its `x`. -/
+/-- Checker helper: entry `e` followed by the older entries `t`. Head and tail are passed
+separately so the recursion never rebuilds a list cell (the benchmark showed the earlier
+`checkInvariant (e' :: t)` formulation allocating 3 words per entry). -/
+def checkFrom : Entry → List Entry → Bool
+  | e, [] => e.cum == e.x
+  | e, e' :: t => e.cum == e.x + e'.cum && checkFrom e' t
+
+/-- Invariant checker, O(n), no allocation: each `cum` is its `x` plus the next older
+entry's `cum`; the oldest entry's `cum` is its `x`. -/
 def checkInvariant : List Entry → Bool
   | [] => true
-  | [e] => e.cum == e.x
-  | e :: e' :: t => e.cum == e.x + e'.cum && checkInvariant (e' :: t)
+  | e :: t => checkFrom e t
 
 /-- Plan: read the cached total at the head, O(1). Correct only under `Invariant`. -/
 def plan : List Entry → Int
@@ -69,7 +75,8 @@ Arithmetic sites (the generator lists them in the generated file header):
 * `reference`: `e.x + reference t`. Operands: `e.x` (bounded input), `reference t`
   (`ReferenceFits` on the suffix, which is `Bounded` by `BoundedTail`). Result:
   `reference (e :: t)` (`ReferenceFits`).
-* `checkInvariant`: `e.x + e'.cum` (`CheckSiteFits`).
+* `checkFrom`: `e.x + e'.cum`, evaluated for each suffix `e :: e' :: t` of the input
+  (`CheckSiteFits`, with `BoundedTail` for the suffix).
 * `plan`, `run`: none. -/
 
 def minInt : Int := -4611686018427387904   -- -2^62
@@ -91,7 +98,7 @@ def BoundedTail : Prop := ∀ e t, Bounded (e :: t) → Bounded t
 /-- Every value `reference` computes on a bounded input fits in an OCaml int. -/
 def ReferenceFits : Prop := ∀ s, Bounded s → Fits (reference s)
 
-/-- The one arithmetic site in `checkInvariant` fits in an OCaml int. -/
+/-- The one arithmetic site in `checkFrom` fits in an OCaml int. -/
 def CheckSiteFits : Prop := ∀ e e' t, Bounded (e :: e' :: t) → Fits (e.x + e'.cum)
 
 end RunningSum
