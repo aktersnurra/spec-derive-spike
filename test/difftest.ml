@@ -35,6 +35,16 @@ let push_case =
       Alcotest.(check bool) "refusals exercised" true (refused > 0);
       Alcotest.(check bool) "totals at the bound exercised" true (at_bound > 0))
 
+let of_list_case =
+  Alcotest.test_case "running_sum of_list on external lists" `Quick (fun () ->
+      let cases = max 1 (cases / 4) in
+      let failures, accepted, rejected = Push_seq.run_of_list ~oracle ~seed ~cases in
+      Printf.printf "of_list: seed=%d cases=%d accepted valid=%d rejected out-of-range=%d\n%!" seed
+        cases accepted rejected;
+      Alcotest.(check (list string)) "no mismatches" [] (List.filteri (fun i _ -> i < 5) failures);
+      Alcotest.(check bool) "valid lists exercised" true (accepted > 0);
+      Alcotest.(check bool) "out-of-range lists exercised" true (rejected > 0))
+
 let () =
   Alcotest.run "differential"
-    [ ("lean-oracle", List.map test_case Subjects.all); ("by-construction", [ push_case ]) ]
+    [ ("lean-oracle", List.map test_case Subjects.all); ("by-construction", [ push_case; of_list_case ]) ]

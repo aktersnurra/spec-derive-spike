@@ -60,3 +60,65 @@ let run ~oracle ~seed ~cases =
         failures := Printf.sprintf "seed=%d case=%d: total <> reference" seed k :: !failures)
     seqs;
   (List.rev !failures, !refused, !at_bound)
+
+(* of_list on external lists: consistent caches with values in range (accept), and consistent
+   caches with an out-of-range amount, an out-of-range total, or huge values (reject).
+   Compares Running_sum_t.of_list with the Lean checker verdict (2nd field of the
+   `running_sum` oracle output). *)
+
+(** Consistent entries (newest first) from amounts listed newest first; no bounds applied. *)
+let consistent xs =
+  List.fold_right
+    (fun x acc ->
+      match acc with
+      | [] -> [ { G.x; cum = x } ]
+      | (e : G.entry) :: _ -> { G.x; cum = x + e.cum } :: acc)
+    xs []
+
+let external_list st =
+  let in_range n = List.init n (fun _ -> Pick.int_in st (-x_bound) x_bound) in
+  match Random.State.int st 5 with
+  | 0 -> (`Valid, consistent (in_range (Pick.size st 1000)))
+  | 1 ->
+      (* one amount just outside |x| <= 10^12, cached totals still consistent *)
+      let xs = in_range (1 + Pick.size st 999) in
+      let at = Random.State.int st (List.length xs) in
+      let bad = if Random.State.bool st then x_bound + 1 else -x_bound - 1 in
+      (`Bad, consistent (List.mapi (fun i x -> if i = at then bad else x) xs))
+  | 2 ->
+      (* every amount in range, but the running total passes +-10^15 *)
+      let x = if Random.State.bool st then x_bound else -x_bound in
+      (`Bad, consistent (List.init (Pick.int_in st 1001 1010) (fun _ -> x)))
+  | 3 ->
+      (* huge consistent values *)
+      let big = Pick.int_in st 1_000_000_000_000_000_000 4_000_000_000_000_000_000 in
+      (`Bad, consistent [ Pick.int_in st (-x_bound) x_bound; big ])
+  | _ ->
+      (* older entry near max_int: the unguarded e.x + e'.cum would overflow *)
+      let e' = { G.x = max_int - 7; cum = max_int - 7 } in
+      (`Bad, [ { G.x = x_bound; cum = Pick.int_in st (-cum_bound) cum_bound }; e' ])
+
+let run_of_list ~oracle ~seed ~cases =
+  let st = Random.State.make [| seed; 17 |] in
+  let lists = Array.init cases (fun _ -> external_list st) in
+  let lines = Array.map (fun (_, s) -> Subjects.to_line_running_sum s) lists in
+  let expected =
+    Array.of_list (Diff.oracle_outputs ~oracle ~name:"running_sum" (Array.to_list lines))
+  in
+  let failures = ref [] and accepted = ref 0 and rejected_bad = ref 0 in
+  Array.iteri
+    (fun k (kind, s) ->
+      let ok = Option.is_some (T.of_list s) in
+      let lean = List.nth (String.split_on_char ' ' expected.(k)) 1 in
+      if string_of_bool ok <> lean then
+        failures := Printf.sprintf "seed=%d case=%d: of_list accepts=%b, Lean checker=%s; input: %s"
+            seed k ok lean (Diff.shorten lines.(k)) :: !failures;
+      (match (kind, ok) with
+      | `Valid, true -> incr accepted
+      | `Bad, false -> incr rejected_bad
+      | `Valid, false ->
+          failures := Printf.sprintf "seed=%d case=%d: valid list rejected" seed k :: !failures
+      | `Bad, true ->
+          failures := Printf.sprintf "seed=%d case=%d: out-of-range list accepted" seed k :: !failures))
+    lists;
+  (List.rev !failures, !accepted, !rejected_bad)
