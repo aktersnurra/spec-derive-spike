@@ -5,4 +5,5 @@ let () =
   print_endline "Cells: median ns/call ± IQR as % of median (21 samples). Speedup = reference/plan, reference/run.";
   List.iter
     (fun s -> Harness.Bench.run s ~seed ~sizes:[ 0; 1; 10; 100; 1000 ])
-    Subjects.all
+    Subjects.all;
+  Workflow.run ()
