@@ -58,4 +58,4 @@ let gen st ~size ~valid =
   if valid then s else corrupt st s
 
 let workload st ~size =
-  consistent (List.init size (fun _ -> Random.State.int st (2 * x_bound) - x_bound))
+  consistent (List.init size (fun _ -> Random.State.full_int st (2 * x_bound + 1) - x_bound))
