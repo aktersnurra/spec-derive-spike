@@ -10,7 +10,7 @@ let max_size = 1000
 let reference (s, k) = G.reference s k
 let plan (s, k) = G.plan s k
 let check_invariant (s, _) = G.check_invariant s
-let run (s, k) = G.run s k
+let run (s, k) = Some (G.run s k) (* never refuses: no arithmetic *)
 let equal_output = Option.equal Int.equal
 let show_output = function None -> "none" | Some v -> Printf.sprintf "some %d" v
 

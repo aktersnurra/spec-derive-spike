@@ -6,7 +6,12 @@ import SpecDerive.SortedLookup.Proofs
 example : RunningSum.PlanCorrect := RunningSum.plan_correct
 example : RunningSum.CheckSound := RunningSum.check_sound
 example : RunningSum.CheckComplete := RunningSum.check_complete
-example : RunningSum.RunCorrect := RunningSum.run_correct
+example : RunningSum.RunSound := RunningSum.run_sound
+example : RunningSum.RunComplete := RunningSum.run_complete
+example : RunningSum.CheckBoundedSound := RunningSum.check_bounded_sound
+example : RunningSum.FallbackDomainTail := RunningSum.fallback_domain_tail
+example : RunningSum.FallbackFits := RunningSum.fallback_fits
+example : RunningSum.CounterFits := RunningSum.counter_fits
 example : RunningSum.BoundedTail := RunningSum.bounded_tail
 example : RunningSum.ReferenceFits := RunningSum.reference_fits
 example : RunningSum.CheckSiteFits := RunningSum.check_site_fits
@@ -26,7 +31,12 @@ example : SortedLookup.RunCorrect := SortedLookup.run_correct
 #print axioms RunningSum.plan_correct
 #print axioms RunningSum.check_sound
 #print axioms RunningSum.check_complete
-#print axioms RunningSum.run_correct
+#print axioms RunningSum.run_sound
+#print axioms RunningSum.run_complete
+#print axioms RunningSum.check_bounded_sound
+#print axioms RunningSum.fallback_domain_tail
+#print axioms RunningSum.fallback_fits
+#print axioms RunningSum.counter_fits
 #print axioms RunningSum.bounded_tail
 #print axioms RunningSum.reference_fits
 #print axioms RunningSum.check_site_fits

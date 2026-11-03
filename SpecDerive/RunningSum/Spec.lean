@@ -65,10 +65,27 @@ def plan : List Entry → Int
   | [] => 0
   | e :: _ => e.cum
 
-/-- Runtime entry point: use the plan only when its proof's assumption holds.
-Precondition (not checked): `Bounded s`, so the fallback `reference` cannot overflow. -/
-def run (s : List Entry) : Int :=
-  if checkInvariant s then plan s else reference s
+/-- Domain check for the fallback, counting entries with `n`: at most 1000 entries and every
+|x| ≤ 10^12. (`reference` never reads `cum`, so `cum` is not checked.) `n + 1` is evaluated only
+after `n < 1000` passes. -/
+def checkBoundedFrom (n : Int) : List Entry → Bool
+  | [] => true
+  | e :: t => n < 1000 && (-1000000000000 ≤ e.x && (e.x ≤ 1000000000000 &&
+      checkBoundedFrom (n + 1) t))
+
+/-- The fallback's domain check: is it safe to recompute with `reference`? O(n). -/
+def checkBounded (s : List Entry) : Bool := checkBoundedFrom 0 s
+
+/-- Runtime entry point, safe on any input:
+* invariant holds: the O(1) plan;
+* stale cache but the input is in the fallback's domain (`checkBounded`): recompute with
+  `reference`;
+* otherwise `none`. `none` means "outside the supported domain" (recomputing could overflow
+  an OCaml int), not "invalid": the Lean total exists, the generated code cannot compute it. -/
+def run (s : List Entry) : Option Int :=
+  if checkInvariant s then some (plan s)
+  else if checkBounded s then some (reference s)
+  else none
 
 /-- Insert a new newest entry with amount `x` in O(1), keeping the invariant true by
 construction: the new cached total is `x` plus the old head's (`plan s`). Refuses (`none`)
@@ -92,8 +109,9 @@ def CheckSound : Prop := ∀ s, checkInvariant s = true → Invariant s
 /-- (b) The Bool checker is complete: it accepts every consistent, in-range list. -/
 def CheckComplete : Prop := ∀ s, Invariant s → checkInvariant s = true
 
-/-- `run` agrees with the reference on every input. -/
-def RunCorrect : Prop := ∀ s, run s = reference s
+/-- `run` never gives a wrong answer: any value it returns is the reference total. -/
+def RunSound : Prop := ∀ s v, run s = some v → v = reference s
+
 
 /-- `push` keeps the full invariant (consistency and bounds): lists built by `push` never
 need checking. -/
@@ -127,9 +145,15 @@ Arithmetic sites (the generator lists them in the generated file header):
   calling `checkFrom e`, and `checkFrom` checks `inRange e'` before evaluating the addition
   (`&&` short-circuits). So both operands are in range (`CheckSiteFits`). That ordering is
   read off the code, not proved.
+* `checkBoundedFrom`: `n + 1`, evaluated only after `n < 1000` passes, with `n` starting at 0
+  (`CounterFits`; the guard order is read off the code).
 * `push`: `x + plan s`, evaluated only after `|x| ≤ 10^12` is checked; `plan s` is in range
   when `ValuesBounded s`, which the invariant includes (`PushSiteFits`).
-* `plan`, `run`, `inRange`: none. -/
+* `plan`, `run`, `inRange`, `checkBounded`: none.
+
+`run` calls `reference` only when `checkBounded` passed: `CheckBoundedSound` gives
+`FallbackDomain`, `FallbackFits` bounds the result, and `FallbackDomainTail` covers the
+recursion. -/
 
 def minInt : Int := -4611686018427387904   -- -2^62
 def maxInt : Int := 4611686018427387903    -- 2^62 - 1
@@ -144,6 +168,26 @@ def Bounded (s : List Entry) : Prop :=
            -1000000000000000 ≤ e.cum ∧ e.cum ≤ 1000000000000000
 
 instance (s : List Entry) : Decidable (Bounded s) := by unfold Bounded; infer_instance
+
+/-- The domain `reference` needs: at most 1000 entries and every |x| ≤ 10^12. -/
+def FallbackDomain (s : List Entry) : Prop :=
+  s.length ≤ 1000 ∧ ∀ e ∈ s, -1000000000000 ≤ e.x ∧ e.x ≤ 1000000000000
+
+/-- The fallback's domain check is sound. -/
+def CheckBoundedSound : Prop := ∀ s, checkBounded s = true → FallbackDomain s
+
+/-- Recursion in `reference` stays in the fallback domain. -/
+def FallbackDomainTail : Prop := ∀ e t, FallbackDomain (e :: t) → FallbackDomain t
+
+/-- Every value `reference` computes on the fallback domain fits in an OCaml int. -/
+def FallbackFits : Prop := ∀ s, FallbackDomain s → Fits (reference s)
+
+/-- The counter in `checkBoundedFrom` fits: it starts at 0 and `n + 1` is evaluated only
+when `n < 1000`. -/
+def CounterFits : Prop := ∀ n : Int, 0 ≤ n → n < 1000 → Fits (n + 1)
+
+/-- `run` never refuses inside the documented domain. -/
+def RunComplete : Prop := ∀ s, Bounded s → run s = some (reference s)
 
 /-- Recursion stays in the domain: the tail of a bounded list is bounded. -/
 def BoundedTail : Prop := ∀ e t, Bounded (e :: t) → Bounded t

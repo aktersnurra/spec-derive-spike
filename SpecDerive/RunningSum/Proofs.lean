@@ -51,13 +51,6 @@ theorem check_complete : CheckComplete := by
     simp only [checkInvariant, Bool.and_eq_true, inRange_iff, checkFrom_iff]
     exact ⟨hb.1, hc, hb.2⟩
 
-theorem run_correct : RunCorrect := by
-  unfold RunCorrect run
-  intro s
-  split
-  · exact plan_correct s (check_sound s ‹_›).1
-  · rfl
-
 /-! ## Integer bounds -/
 
 theorem bounded_tail : BoundedTail := by
@@ -167,5 +160,72 @@ theorem reference_fits_inv : ReferenceFitsInv := by
   have := plan_values_bounded s hs
   rw [← plan_correct s hinv]
   constructor <;> omega
+
+/-! ## `run`: the fallback is guarded by its own domain check -/
+
+theorem checkBoundedFrom_iff (n : Int) (s : List Entry) (hn : 0 ≤ n) (hn' : n ≤ 1000) :
+    checkBoundedFrom n s = true ↔
+      n + (s.length : Int) ≤ 1000 ∧ ∀ e ∈ s, -1000000000000 ≤ e.x ∧ e.x ≤ 1000000000000 := by
+  induction s generalizing n with
+  | nil => simp only [checkBoundedFrom, List.length_nil, List.not_mem_nil, false_implies,
+      implies_true, and_true, true_iff]; omega
+  | cons e t ih =>
+    by_cases hlt : n < 1000
+    · simp only [checkBoundedFrom, Bool.and_eq_true, decide_eq_true_eq,
+        ih (n + 1) (by omega) (by omega), List.length_cons, List.forall_mem_cons]
+      constructor
+      · rintro ⟨_, h2, h3, h4, h5⟩
+        exact ⟨by omega, ⟨h2, h3⟩, h5⟩
+      · rintro ⟨h1, ⟨h2, h3⟩, h5⟩
+        exact ⟨hlt, h2, h3, by omega, h5⟩
+    · simp only [checkBoundedFrom, Bool.and_eq_true, decide_eq_true_eq, hlt, false_and,
+        false_iff, List.length_cons]
+      rintro ⟨h, -⟩
+      omega
+
+theorem check_bounded_sound : CheckBoundedSound := by
+  unfold CheckBoundedSound FallbackDomain checkBounded
+  intro s h
+  have ⟨h1, h2⟩ := (checkBoundedFrom_iff 0 s (by omega) (by omega)).mp h
+  exact ⟨by omega, h2⟩
+
+theorem check_bounded_of_bounded (s : List Entry) (h : Bounded s) : checkBounded s = true := by
+  unfold checkBounded
+  obtain ⟨hl, hm⟩ := h
+  exact (checkBoundedFrom_iff 0 s (by omega) (by omega)).mpr
+    ⟨by omega, fun e he => ⟨(hm e he).1, (hm e he).2.1⟩⟩
+
+theorem fallback_domain_tail : FallbackDomainTail := by
+  unfold FallbackDomainTail FallbackDomain
+  intro e t ⟨hl, hm⟩
+  simp only [List.length_cons] at hl
+  exact ⟨by omega, fun x hx => hm x (List.mem_cons_of_mem _ hx)⟩
+
+theorem fallback_fits : FallbackFits := by
+  unfold FallbackFits FallbackDomain Fits minInt maxInt
+  intro s ⟨hl, hm⟩
+  have := reference_le s hm
+  constructor <;> omega
+
+theorem counter_fits : CounterFits := by
+  unfold CounterFits Fits minInt maxInt
+  intro n h1 h2
+  constructor <;> omega
+
+theorem run_sound : RunSound := by
+  unfold RunSound run
+  intro s v h
+  split at h
+  · cases h; exact plan_correct s (check_sound s ‹_›).1
+  · split at h
+    · cases h; rfl
+    · cases h
+
+theorem run_complete : RunComplete := by
+  unfold RunComplete run
+  intro s hb
+  split
+  · rw [plan_correct s (check_sound s ‹_›).1]
+  · simp only [check_bounded_of_bounded s hb, ↓reduceIte]
 
 end RunningSum

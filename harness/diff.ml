@@ -4,7 +4,8 @@
     - generated [reference] and [check_invariant] = the Lean oracle, and the oracle says the
       input is inside [Bounded] (so the generator stays in the proved domain);
     - [plan] = [reference] whenever [check_invariant] holds;
-    - [run] = [reference] always. *)
+    - [run] = [Some reference] on every generated input (all are inside [Bounded], which
+      the oracle confirms, so [run] must not refuse). *)
 
 type report = {
   cases : int;
@@ -63,9 +64,10 @@ let run (type i o) (module S : Subject.S with type input = i and type output = o
         if not (S.equal_output p r) then
           fail k "invariant holds but plan = %s, reference = %s" (S.show_output p) (S.show_output r))
       else if not (S.equal_output p r) then incr differs;
-      let u = S.run input in
-      if not (S.equal_output u r) then
-        fail k "run = %s, reference = %s" (S.show_output u) (S.show_output r))
+      match S.run input with
+      | Some u when S.equal_output u r -> ()
+      | Some u -> fail k "run = %s, reference = %s" (S.show_output u) (S.show_output r)
+      | None -> fail k "run refused an input inside Bounded")
     inputs;
   {
     cases;

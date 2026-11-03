@@ -14,7 +14,9 @@ module type S = sig
   val reference : input -> output
   val plan : input -> output
   val check_invariant : input -> bool
-  val run : input -> output
+  val run : input -> output option
+  (** [None] means the input is outside the example's supported domain (not "invalid"). *)
+
   val equal_output : output -> output -> bool
 
   val show_output : output -> string
