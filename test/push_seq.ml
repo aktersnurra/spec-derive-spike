@@ -20,9 +20,10 @@ let amounts st =
   | 1 -> List.init (Pick.int_in st 995 1010) (fun _ -> -x_bound)
   | 2 ->
       List.init (Pick.size st 200) (fun _ ->
-          match Random.State.int st 4 with
+          match Random.State.int st 5 with
           | 0 -> x_bound + 1
           | 1 -> -x_bound - 1
+          | 4 -> if Random.State.bool st then min_int else max_int
           | 2 -> Pick.int_in st (-1_000_000_000_000_000_000) 1_000_000_000_000_000_000
           | _ -> Pick.int_in st (-x_bound) x_bound)
   | _ -> List.init (Pick.size st 1100) (fun _ -> Pick.int_in st (-x_bound) x_bound)
@@ -77,8 +78,16 @@ let consistent xs =
 
 let external_list st =
   let in_range n = List.init n (fun _ -> Pick.int_in st (-x_bound) x_bound) in
-  match Random.State.int st 5 with
+  match Random.State.int st 6 with
   | 0 -> (`Valid, consistent (in_range (Pick.size st 1000)))
+  | 5 ->
+      (* exact OCaml extremes: a single consistent entry, or an older entry whose x or cum is
+         min_int / max_int under an in-range head *)
+      let ext () = if Random.State.bool st then min_int else max_int in
+      if Random.State.bool st then (let v = ext () in (`Bad, [ { G.x = v; cum = v } ]))
+      else
+        let e' = if Random.State.bool st then { G.x = ext (); cum = 0 } else { G.x = 0; cum = ext () } in
+        (`Bad, [ { G.x = x_bound; cum = Pick.int_in st (-cum_bound) cum_bound }; e' ])
   | 1 ->
       (* one amount just outside |x| <= 10^12, cached totals still consistent *)
       let xs = in_range (1 + Pick.size st 999) in
