@@ -266,10 +266,10 @@ partial def trExpr (e : Expr) : TrM OExpr := do
   | .fvar id =>
     let some n := (← get).names[id]? | throwError "unbound variable {e}"
     return .var n
-  | .letE _ ty v b _ =>
+  | .letE n ty v b _ =>
     discard <| trType ty
     let v' ← trExpr v
-    withLetDecl `x ty v fun x => do
+    withLetDecl n ty v fun x => do
       let b := b.instantiate1 x
       let n ← bindBinder x b
       return .letE n v' (← trExpr b)
@@ -459,8 +459,15 @@ def trDef (c : Name) : TrM FnOut := do
 /-- The fixed interface every example exports. -/
 def interface : List String := ["reference", "plan", "checkInvariant", "run"]
 
+/-- An example: OCaml file stem, Lean namespace, and extra exported operations
+(e.g. invariant-preserving `push`) beyond the fixed interface. -/
+structure Example where
+  stem : String
+  ns : Name
+  ops : List String := []
+
 /-- Translate the interface and its dependencies, dependencies first. -/
-partial def trExample (ns : Name) : TrM (Array FnOut) := do
+partial def trExample (ns : Name) (exports : List String) : TrM (Array FnOut) := do
   let used := (← getEnv).constants.fold (init := ocamlReserved) fun acc n _ =>
     if n.getPrefix == ns then ocamlName n :: acc else acc
   let rec visit (stack : List Name) (out : Array FnOut) (c : Name) : TrM (Array FnOut) := do
@@ -473,7 +480,7 @@ partial def trExample (ns : Name) : TrM (Array FnOut) := do
     if out.any (·.name == f.name) then throwError "OCaml name clash: {f.name}"
     return out.push f
   let mut out := #[]
-  for r in interface do out ← visit [] out (ns ++ Name.mkSimple r)
+  for r in exports do out ← visit [] out (ns ++ Name.mkSimple r)
   return out
 
 /-! ## Files -/
@@ -507,19 +514,22 @@ def mliVal (f : FnOut) : MetaM String := do
   return s!"{doc}val {f.name} : {" -> ".intercalate tys}\n"
 
 /-- Returns the `.ml` and `.mli` contents for the example in namespace `ns`. -/
-def emitExample (ns : Name) : MetaM (String × String) := do
-  let (fns, st) ← (trExample ns).run { ns }
+def emitExample (ex : Example) : MetaM (String × String) := do
+  let ns := ex.ns
+  let exports := interface ++ ex.ops
+  let (fns, st) ← (trExample ns exports).run { ns }
   let hdr ← header ns fns (st.types.map (·.1))
   let types := "\n".intercalate (st.types.toList.map (·.2)) ++ "\n"
   let ml := hdr ++ "\n" ++ types ++ String.join (fns.toList.map fun f => "\n" ++ ppFn f true)
-  let exported := fns.filter fun f => interface.any (ns ++ Name.mkSimple · == f.lean)
+  let exported := fns.filter fun f => exports.any (ns ++ Name.mkSimple · == f.lean)
   let vals ← exported.toList.mapM mliVal
   let mli := hdr ++ "\n" ++ types ++ String.join (vals.map ("\n" ++ ·))
   return (ml, mli)
 
-/-- Registered examples: OCaml file stem and Lean namespace. -/
-def examples : List (String × Name) :=
-  [("running_sum", `RunningSum), ("sorted_lookup", `SortedLookup)]
+/-- Registered examples. -/
+def examples : List Example :=
+  [{ stem := "running_sum", ns := `RunningSum, ops := ["push"] },
+   { stem := "sorted_lookup", ns := `SortedLookup }]
 
 unsafe def runMeta (act : MetaM α) : IO α := do
   initSearchPath (← findSysroot)
@@ -531,9 +541,9 @@ unsafe def runMeta (act : MetaM α) : IO α := do
   return a
 
 unsafe def genAll (outDir : System.FilePath) : IO Unit := do
-  let files ← runMeta <| examples.mapM fun (stem, ns) => do
-    let (ml, mli) ← emitExample ns
-    return [(s!"{stem}_gen.ml", ml), (s!"{stem}_gen.mli", mli)]
+  let files ← runMeta <| examples.mapM fun ex => do
+    let (ml, mli) ← emitExample ex
+    return [(s!"{ex.stem}_gen.ml", ml), (s!"{ex.stem}_gen.mli", mli)]
   IO.FS.createDirAll outDir
   for (name, contents) in files.flatten do
     IO.FS.writeFile (outDir / name) contents
