@@ -9,6 +9,8 @@ import SpecDerive
 
 Input line formats (space-separated tokens):
 * `running_sum`: entries newest first, each `x:cum`. An empty line is the empty list.
+* `running_sum_push`: amounts, pushed in order onto the empty list with `RunningSum.push`.
+  Prints `<refused pushes> <plan> <reference> <checkInvariant> <entries x:cum ...>`.
 * `sorted_lookup`: the query key, then entries `key:value`. Results print as `none` or
   `some <v>`.
 -/
@@ -23,6 +25,17 @@ def runningSum (line : String) : Option String := do
     pure ({ x, cum } : RunningSum.Entry)
   pure s!"{RunningSum.reference s} {RunningSum.checkInvariant s} {decide (RunningSum.Bounded s)}"
 
+def runningSumPush (line : String) : Option String := do
+  let xs ← (words line).mapM String.toInt?
+  let step := fun ((s, refused) : List RunningSum.Entry × Nat) x =>
+    match RunningSum.push x s with
+    | some s' => (s', refused)
+    | none => (s, refused + 1)
+  let (s, refused) := xs.foldl step ([], 0)
+  let fields := [toString refused, toString (RunningSum.plan s), toString (RunningSum.reference s),
+    toString (RunningSum.checkInvariant s)] ++ s.map fun e => s!"{e.x}:{e.cum}"
+  pure (" ".intercalate fields)
+
 def sortedLookup (line : String) : Option String := do
   let k :: toks := words line | none
   let k ← k.toInt?
@@ -35,7 +48,8 @@ def sortedLookup (line : String) : Option String := do
   pure s!"{r} {SortedLookup.checkInvariant s} {decide (SortedLookup.Bounded s k)}"
 
 def examples : List (String × (String → Option String)) :=
-  [("running_sum", runningSum), ("sorted_lookup", sortedLookup)]
+  [("running_sum", runningSum), ("running_sum_push", runningSumPush),
+   ("sorted_lookup", sortedLookup)]
 
 partial def loop (f : String → Option String) (stdin : IO.FS.Stream) (stdout : IO.FS.Stream)
     (lineNo : Nat) : IO UInt32 := do

@@ -1,0 +1,4 @@
+; Hand-written, trusted: the typed wrapper around generated code.
+(library
+ (name wrapper)
+ (libraries gen))

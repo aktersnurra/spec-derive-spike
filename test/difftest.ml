@@ -25,5 +25,16 @@ let test_case (module S : Subject.S) =
       Alcotest.(check bool) "violations that the plan gets wrong exercised" true
         (r.plan_differs_when_broken > 0))
 
+let push_case =
+  Alcotest.test_case "running_sum push sequences" `Quick (fun () ->
+      let cases = max 1 (cases / 4) in
+      let failures, refused, at_bound = Push_seq.run ~oracle ~seed ~cases in
+      Printf.printf "push sequences: seed=%d cases=%d refused pushes=%d totals at +-10^15=%d\n%!"
+        seed cases refused at_bound;
+      Alcotest.(check (list string)) "no mismatches" [] (List.filteri (fun i _ -> i < 5) failures);
+      Alcotest.(check bool) "refusals exercised" true (refused > 0);
+      Alcotest.(check bool) "totals at the bound exercised" true (at_bound > 0))
+
 let () =
-  Alcotest.run "differential" [ ("lean-oracle", List.map test_case Subjects.all) ]
+  Alcotest.run "differential"
+    [ ("lean-oracle", List.map test_case Subjects.all); ("by-construction", [ push_case ]) ]
