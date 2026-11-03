@@ -11,6 +11,7 @@ example : RunningSum.BoundedTail := RunningSum.bounded_tail
 example : RunningSum.ReferenceFits := RunningSum.reference_fits
 example : RunningSum.CheckSiteFits := RunningSum.check_site_fits
 example : RunningSum.PushPreserves := RunningSum.push_preserves
+example : RunningSum.PushPreservesConsistent := RunningSum.push_preserves_consistent
 example : RunningSum.PushTail := RunningSum.push_tail
 example : RunningSum.PushReference := RunningSum.push_reference
 example : RunningSum.PushTotal := RunningSum.push_total
@@ -30,6 +31,7 @@ example : SortedLookup.RunCorrect := SortedLookup.run_correct
 #print axioms RunningSum.reference_fits
 #print axioms RunningSum.check_site_fits
 #print axioms RunningSum.push_preserves
+#print axioms RunningSum.push_preserves_consistent
 #print axioms RunningSum.push_tail
 #print axioms RunningSum.push_reference
 #print axioms RunningSum.push_total
