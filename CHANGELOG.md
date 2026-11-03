@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-03: bounds in the invariant; fair baseline
+- `RunningSum.Invariant` is now cache consistency and value bounds; the checker range-checks
+  each entry before using it in arithmetic, so the wrapper path needs no unchecked
+  precondition. `PlanCorrect`/`PushTotal` stated over `Consistent`; new
+  `PushPreservesConsistent`; `CheckSiteFits` now guarded by `InRange` instead of `Bounded`.
+- `of_list` differential test on consistent but out-of-range lists.
+- Bound theorems classical-free (split conjunction goals before `omega`).
+- Hand-written `{ total; items }` baselines (with and without checks) in the workflow
+  benchmark.
+
 ## 2026-11-03: keep the invariant true by construction
 - `RunningSum.push`: generated O(1) insert that refuses at the value bounds; proofs of
   invariant preservation, semantics, value bounds, and `reference` fitting under the

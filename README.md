@@ -72,11 +72,11 @@ docs/adding-an-optimization.md   the procedure for a new triple
 
 | theorem | running_sum | sorted_lookup |
 |---|---|---|
-| `Invariant → plan = reference` | `plan_correct` | `plan_correct` |
-| checker sound / complete | `check_sound`, `check_complete` | same |
+| cache consistency → `plan = reference` | `plan_correct` | `plan_correct` (keys sorted) |
+| checker sound / complete for the invariant (consistency and value bounds) | `check_sound`, `check_complete` | same (keys sorted) |
 | `run = reference` (all inputs) | `run_correct` | `run_correct` |
 | OCaml `int` bounds | `bounded_tail`, `reference_fits`, `check_site_fits` | none needed (0 arithmetic sites) |
-| `push` preserves the invariant | `push_preserves` | none |
+| `push` preserves the invariant (consistency and bounds) | `push_preserves`, `push_preserves_consistent` | none |
 | `push` semantics | `push_tail`, `push_reference`, `push_total` | none |
 | `push` stays in range | `push_values_bounded`, `push_site_fits`, `reference_fits_inv` | none |
 
@@ -88,20 +88,28 @@ docs/adding-an-optimization.md   the procedure for a new triple
 'RunningSum.check_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
 'RunningSum.run_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
 'RunningSum.bounded_tail' depends on axioms: [propext, Quot.sound]
-'RunningSum.reference_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
-'RunningSum.check_site_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.reference_fits' depends on axioms: [propext, Quot.sound]
+'RunningSum.check_site_fits' depends on axioms: [propext, Quot.sound]
 'RunningSum.push_preserves' depends on axioms: [propext, Quot.sound]
+'RunningSum.push_preserves_consistent' depends on axioms: [propext, Quot.sound]
 'RunningSum.push_tail' depends on axioms: [propext, Quot.sound]
 'RunningSum.push_reference' depends on axioms: [propext, Quot.sound]
 'RunningSum.push_total' depends on axioms: [propext, Quot.sound]
 'RunningSum.push_values_bounded' depends on axioms: [propext, Quot.sound]
-'RunningSum.push_site_fits' depends on axioms: [propext, Classical.choice, Quot.sound]
-'RunningSum.reference_fits_inv' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.push_site_fits' depends on axioms: [propext, Quot.sound]
+'RunningSum.reference_fits_inv' depends on axioms: [propext, Quot.sound]
 'SortedLookup.plan_correct' depends on axioms: [propext, Quot.sound]
 'SortedLookup.check_sound' depends on axioms: [propext, Quot.sound]
 'SortedLookup.check_complete' depends on axioms: [propext, Quot.sound]
 'SortedLookup.run_correct' depends on axioms: [propext, Quot.sound]
 ```
+
+`Classical.choice` (accepted by the gate, as in the formal-spec skill) remains in three theorems:
+`check_sound`, `check_complete` and `run_correct`. It comes from Lean core's decidable equality on
+`Int` (`beq_iff_eq`; even a `decide_eq_true_iff` route uses it), which the checker's `==`
+relies on. Removing it would mean rewriting the checker without `==`, which is not cheap. The
+other source, `omega` on a conjunction goal, was cheap to remove: the bound theorems now split
+the goal first and are classical-free.
 
 **Tested, not proved:** that the generated OCaml behaves like the Lean definitions. This is
 covered by the differential test against the Lean oracle, plus `plan = reference` whenever the
@@ -114,11 +122,16 @@ checker holds, and `run = reference` always.
 - The OCaml compiler and runtime. Also the Lean compiler, which builds the oracle: the oracle
   runs compiled Lean, not the kernel.
 - The hand-written adapters in `subjects/`: input generators and line formats.
-- The typed wrapper `wrapper/running_sum_t.ml` (6 lines). Its guarantee is that every `t` passed
-  through the generated checker or the generated `push`. That rests on the generator being
-  faithful, which is tested, not proved.
-- The `Bounded` precondition. **It is not checked at runtime**, including on `of_list` inputs. The generated `.mli` documents
-  it, and the difftest asserts (through the oracle) that every generated input is inside it.
+- The typed wrapper `wrapper/running_sum_t.ml` (6 lines). Every `t` satisfies the full invariant,
+  consistency and value bounds. That rests on the generator being faithful, which is tested,
+  not proved.
+- Evaluation order in the checker. `check_from` range-checks an entry before the addition that
+  uses it (`&&` short-circuits), so the checker cannot overflow on arbitrary input. This is
+  read off the code; `CheckSiteFits` assumes it.
+- The `Bounded` precondition of `reference` and `run` (and of `sorted_lookup`). **It is not
+  checked at runtime.** The generated `.mli` documents it, and the difftest asserts (through the
+  oracle) that every generated input is inside it. The wrapper path (`of_list`, `push`,
+  `total`) no longer needs it: the invariant carries the bounds.
 - Coverage of arithmetic sites by `Fits` theorems. The generator counts the sites per function
   and prints them in the header, but matching each site to a theorem is done by review.
 
@@ -132,7 +145,7 @@ Lean `Int` is unbounded. OCaml `int` is 63-bit: `[-2^62, 2^62-1]`. The approach:
   `BoundedTail`, so every recursive call stays in the domain. For example, `reference_fits`
   proves |reference s| ≤ 10^12 · length ≤ 10^15.
 - The generator prints the site inventory in the header
-  (`reference: 1, check_from: 1`), which makes a missed site visible in review.
+  (`reference: 1, check_from: 1, push: 1`), which makes a missed site visible in review.
 - The generator rejects `Nat` (truncated subtraction), `/` and `%` (Lean's `Int` division is
   Euclidean, OCaml's truncates), and literals that don't fit.
 
@@ -143,6 +156,16 @@ is that "one theorem per site" is a convention the tools don't enforce.
 
 Checking on every call (`run`) cancels most of the plan's gain. So `running_sum` also has
 `push x s : Option (List Entry)`, which sets the new head's cached total to `x + plan s` in O(1).
+
+**The invariant includes the bounds.** `Invariant s` is cache consistency and every
+|x| ≤ 10^12 and |cum| ≤ 10^15. The checker range-checks each entry once, before using it in
+arithmetic. So `of_list` is safe on any list, and a consistent list with out-of-range values is
+rejected. `plan_correct` and `push_total` need only consistency, so they are stated over
+`Consistent`. The `of_list` differential test feeds consistent lists with an out-of-range
+amount, an out-of-range total, huge values, and an older entry near `max_int`. On all of them the
+generated checker agrees with the Lean checker. A generated `in_range` that always returns
+`true` fails the test; the generic differential test does not catch it, because its inputs are
+all in range.
 
 **Refusal instead of a precondition.** `push` returns `none` when |x| > 10^12 or the new total
 would leave ±10^15. Two reasons for not using a length precondition: a length bound can't be
@@ -204,43 +227,53 @@ Caveats: the numbers are from one machine and are noisy (a few IQRs exceed 10%).
 pinning or frequency control, and the clock is `Unix.gettimeofday`. Treat ratios under about 1.2x
 as noise.
 
-**running_sum, whole workflow** (`bench/workflow.ml`). Each path builds n entries from the same
-amounts:
-- push path: `push` then `total` (O(1), no check);
-- reference: a plain cons, then `reference`;
-- checked run: a cons with the total computed by hand, then `run` (O(n) check + plan).
+**running_sum, whole workflow** (`bench/workflow.ml`, `bench/baseline.ml`). Each path consumes
+the same n amounts:
+- reference: a plain cons, then `reference` (O(n) per query);
+- generated: `push` + `total` through the wrapper (proved, generated, O(1));
+- hand: hand-written `{ total; items }`, with no checks and no `Option`;
+- hand+checks: the same, plus the generated push's bounds checks and `Option` result.
+
+Numbers are from one run. The last column is generated ÷ hand+checks; across three runs it
+ranged from 1.01x to 1.26x, and A at n=1000 was the noisiest cell.
 
 A. Build n entries, then query once:
 
-| n | push path ns | reference ns | checked run ns | push speedup | run speedup |
+| n | reference ns | generated ns | hand ns | hand+checks ns | generated / hand+checks |
 |---:|---:|---:|---:|---:|---:|
-| 1 | 10.0 ±6% | 8.9 ±2% | 10.5 ±1% | 0.89x | 0.85x |
-| 10 | 67.3 ±8% | 64.7 ±3% | 61.9 ±5% | 0.96x | 1.05x |
-| 100 | 615.1 ±14% | 566.3 ±9% | 498.1 ±11% | 0.92x | 1.14x |
-| 1000 | 6372.1 ±7% | 6024.3 ±5% | 5513.7 ±9% | 0.95x | 1.09x |
+| 10 | 64.3 ±3% | 70.4 ±1% | 51.6 ±5% | 68.0 ±6% | 1.04x |
+| 100 | 533.1 ±10% | 587.6 ±7% | 394.4 ±5% | 570.9 ±3% | 1.03x |
+| 1000 | 5757.0 ±12% | 6350.5 ±9% | 3576.6 ±3% | 5045.0 ±7% | 1.26x |
 
 B. Query after every insert (n inserts, n queries):
 
-| n | push path ns | reference ns | checked run ns | push speedup | run speedup |
+| n | reference ns | generated ns | hand ns | hand+checks ns | generated / hand+checks |
 |---:|---:|---:|---:|---:|---:|
-| 1 | 10.5 ±1% | 11.4 ±4% | 12.5 ±8% | 1.09x | 0.91x |
-| 10 | 85.1 ±12% | 142.7 ±2% | 160.0 ±2% | 1.68x | 0.89x |
-| 100 | 705.1 ±13% | 10749.8 ±1% | 7956.1 ±1% | 15x | 1.35x |
-| 1000 | 7093.0 ±35% | 1052141.2 ±2% | 841140.7 ±1% | 148x | 1.25x |
+| 10 | 160.2 ±1% | 106.0 ±2% | 84.4 ±3% | 99.6 ±3% | 1.06x |
+| 100 | 11109.7 ±1% | 956.1 ±3% | 732.5 ±2% | 893.1 ±5% | 1.07x |
+| 1000 | 1080870.6 ±2% | 10530.9 ±5% | 7858.5 ±13% | 9508.8 ±8% | 1.11x |
 
-Per insert: `push` costs about 5–6 ns and 8 minor words (the `Some` box, the cons cell and the
-record); a plain cons costs about 4 ns and 6 words.
+Per insert (build only), median of three runs:
 
-Where it does **not** win:
-- **Build then query once (A).** By-construction is slightly slower (about 0.9–0.95x, within
-  noise). Each push pays for bounds checks and the `Some` allocation, and a single O(n)
-  `reference` query costs less than building the list does.
-- **n=1 in both scenarios.** Everything is near the harness floor.
+| n | reference (cons) ns / words | generated ns / words | hand ns / words | hand+checks ns / words |
+|---:|---:|---:|---:|---:|
+| 10 | 4.6 / 6 | 6.7 / 8 | 4.6 / 6 | 5.9 / 8 |
+| 100 | 3.7 / 6 | 5.6 / 8 | 3.4 / 6 | 5.7 / 8 |
+| 1000 | 4.3 / 6 | 6.6 / 8 | 3.7 / 6 | 5.8 / 8 |
 
-It pays when queries are frequent relative to inserts: 15x at n=100 and 148x at n=1000 in B,
-where the reference path is O(n²). The checked `run`'s 1.25–1.35x in B is the same
-tail-recursion artifact as above, not the plan. The push path's ±35% spread at n=1000 is GC
-noise (8000 words allocated per call), and the ratio is far outside it.
+What this says:
+- **The proofs add nothing at runtime.** No proof artifact reaches the OCaml.
+- **The generated code is close to equivalent hand-written code, but not identical.**
+  Generated `push` and hand-written code with the same checks allocate the same 8 words per
+  insert. In the steadiest scenario (B) the generated path is 4–16% slower across runs, always
+  in the same direction but under the 1.2x noise threshold. A likely cause, not verified: the
+  spec stores a cached total in every entry, so `push` reads it through the list cell and the
+  entry record (`plan s`), while the hand-written version keeps one total in a record.
+- **What costs is the safety the spec asks for.** The bounds checks and the `Option` result
+  account for most of the gap to the plain hand-written version (about 1.25–1.8x).
+- **Against the naive reference:** building and querying once doesn't win (0.9–0.95x), and
+  querying after every insert wins about 100x at n=1000. The fair comparison is hand+checks, not
+  the reference.
 
 One finding from the benchmark: the first `running_sum` checker, written as
 `checkInvariant (e' :: t)`, rebuilt a list cell on every step (3 words/entry in the generated

@@ -100,7 +100,12 @@ load-bearing). Commit `gen/` together with the spec change: CI's drift job fails
 
 Done for `running_sum` with `push`.
 
-1. **Spec.** Define the operation in the subset. If it can grow a value (a cached total grows
+1. **Spec.** Put the value bounds *in the invariant* (`Invariant s := Consistent s ∧
+   ValuesBounded s`), and have the checker range-check each element before using it in
+   arithmetic. Then a checked or operation-built value needs no unchecked precondition, and
+   the checker is safe on arbitrary input. Keep correctness statements that need only part of
+   the invariant (e.g. `PlanCorrect` over `Consistent`) stated over that part, so they don't get
+   weaker. Define the operation in the subset. If it can grow a value (a cached total grows
    with every insert), have it return `Option` and refuse at the value bounds rather than take a
    length precondition. A length bound can't be stated in the subset, and the caller can't
    enforce it without extra trusted code. Range-check inputs *before* any arithmetic that uses
@@ -117,19 +122,23 @@ Done for `running_sum` with `push`.
 3. **Wrapper.** Write `wrapper/<stem>_t.ml{,i}`, a few lines of trusted code:
    `type t = private entry list`, `of_list` (runs the generated checker), the generated
    operations, and the plan on `t` with no check. The `.mli` states what the type guarantees:
-   every `t` passed through the generated checker or a generated preserving operation. It also
-   states what that rests on: proofs of the Lean model plus a tested, unproven generator, with
-   `Bounded` unchecked on `of_list` inputs.
+   every `t` satisfies the full invariant, consistency and bounds. It also states what that
+   rests on: proofs of the Lean model, a tested but unproven generator, and the checker's
+   evaluation order (range check before arithmetic), which is read off the code.
 4. **Oracle.** Add a sequence mode: one line of operation arguments, applied from the empty
    value. Print the refusal count, plan, reference, checker verdict and the full resulting value.
 5. **Test.** Write a sequence test like `test/push_seq.ml`, which builds through the wrapper.
-   Include sequences that hit each refusal limit exactly. Deliberately break the generated
+   Include sequences that hit each refusal limit exactly. Also test `of_list` with consistent
+   but out-of-range inputs; the generic differential test only feeds in-range inputs, so it
+   cannot catch a checker that drops the bound. Deliberately break the generated
    operation's result and its bound once each, and confirm the test fails.
 6. **Benchmark the whole workflow** (`bench/workflow.ml`): build with operations then query,
    against plain build + reference and against the checked `run`. Do this both for
    query-once and query-after-every-insert, and report the per-operation cost and allocation.
-   For `running_sum`, by-construction loses slightly when building and querying once
-   (about 0.95x), and wins 148x at n=1000 when querying after every insert.
+   Also include a hand-written equivalent with the same checks as the fair baseline: the naive
+   reference flatters the result. For `running_sum`, the generated push allocates the same as
+   the hand-written checked version and is within the noise (about 1.04–1.16x). The checks and
+   the `Option` result are what cost, not the proofs.
 
 ## What you should not need to touch
 
@@ -137,6 +146,6 @@ Done for `running_sum` with `push`.
 `bench/bench.ml` and `scripts/*`. If you have to change them, the workflow did not generalize
 for your case: write down why.
 
-Exception: invariant-preserving operations (step 7) are sequences of operations, which the
-generic input → output `Diff` driver doesn't express. They needed a per-example sequence test
-and workflow benchmark, both reusing `Diff.oracle_outputs`, `Pick` and `Bench.measure`.
+Note: input → output harnesses can't express operation sequences. A stateful example (step 7)
+needs its own sequence test and workflow benchmark. Reuse the oracle runner
+(`Diff.oracle_outputs`), the value picker (`Pick`) and the timer (`Bench.measure`).
