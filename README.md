@@ -6,7 +6,7 @@ A small spike that proves out a **workflow**, not a domain:
    `Invariant` (as a `Prop` plus a `Bool` checker), an optimized `plan`, and
    `run := if checkInvariant s then plan s else reference s`.
 2. **Prove.** The key theorem is `Invariant s → plan s = reference s`. The proofs also show that
-   the checker is sound and complete, that `run = reference`, and that the integer bounds keep
+   the checker is sound and complete, that `run` never gives a wrong answer, and that the integer bounds keep
    OCaml `int` from overflowing. The kernel checks all of this on every `lake build`.
 3. **Generate plain OCaml.** `Emit.lean` reads the *elaborated* definitions (the same terms the
    theorems are about) from the compiled environment and prints `gen/<name>_gen.ml{,i}`. It is
@@ -74,7 +74,8 @@ docs/adding-an-optimization.md   the procedure for a new triple
 |---|---|---|
 | cache consistency → `plan = reference` | `plan_correct` | `plan_correct` (keys sorted) |
 | checker sound / complete for the invariant (consistency and value bounds) | `check_sound`, `check_complete` | same (keys sorted) |
-| `run = reference` (all inputs) | `run_correct` | `run_correct` |
+| `run`: never wrong, never refuses inside `Bounded` | `run_sound`, `run_complete` | `run_correct` (`run = reference`, all inputs) |
+| `run`'s fallback domain check and its bounds | `check_bounded_sound`, `fallback_domain_tail`, `fallback_fits`, `counter_fits` | none needed |
 | OCaml `int` bounds | `bounded_tail`, `reference_fits`, `check_site_fits` | none needed (0 arithmetic sites) |
 | `push` preserves the invariant (consistency and bounds) | `push_preserves`, `push_preserves_consistent` | none |
 | `push` semantics | `push_tail`, `push_reference`, `push_total` | none |
@@ -86,7 +87,12 @@ docs/adding-an-optimization.md   the procedure for a new triple
 'RunningSum.plan_correct' does not depend on any axioms
 'RunningSum.check_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
 'RunningSum.check_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
-'RunningSum.run_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.run_sound' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.run_complete' depends on axioms: [propext, Classical.choice, Quot.sound]
+'RunningSum.check_bounded_sound' depends on axioms: [propext, Quot.sound]
+'RunningSum.fallback_domain_tail' depends on axioms: [propext, Quot.sound]
+'RunningSum.fallback_fits' depends on axioms: [propext, Quot.sound]
+'RunningSum.counter_fits' depends on axioms: [propext, Quot.sound]
 'RunningSum.bounded_tail' depends on axioms: [propext, Quot.sound]
 'RunningSum.reference_fits' depends on axioms: [propext, Quot.sound]
 'RunningSum.check_site_fits' depends on axioms: [propext, Quot.sound]
@@ -104,8 +110,9 @@ docs/adding-an-optimization.md   the procedure for a new triple
 'SortedLookup.run_correct' depends on axioms: [propext, Quot.sound]
 ```
 
-`Classical.choice` (accepted by the gate, as in the formal-spec skill) remains in three theorems:
-`check_sound`, `check_complete` and `run_correct`. It comes from Lean core's decidable equality on
+`Classical.choice` (accepted by the gate, as in the formal-spec skill) remains in the checker theorems
+(`check_sound`, `check_complete`) and the `run` theorems that use them (`run_sound`,
+`run_complete`). It comes from Lean core's decidable equality on
 `Int` (`beq_iff_eq`; even a `decide_eq_true_iff` route uses it), which the checker's `==`
 relies on. Removing it would mean rewriting the checker without `==`, which is not cheap. The
 other source, `omega` on a conjunction goal, was cheap to remove: the bound theorems now split
@@ -113,7 +120,8 @@ the goal first and are classical-free.
 
 **Tested, not proved:** that the generated OCaml behaves like the Lean definitions. This is
 covered by the differential test against the Lean oracle, plus `plan = reference` whenever the
-checker holds, and `run = reference` always.
+checker holds, and `run` returns `Some reference` on every in-domain input. A separate test
+feeds `running_sum`'s `run` stale and out-of-domain inputs.
 
 **Trusted base (not verified by anything here):**
 - `Emit.lean`, the generator. It is tested by the difftest and the reject cases. One mitigation:
@@ -128,12 +136,52 @@ checker holds, and `run = reference` always.
 - Evaluation order in the checker. `check_from` range-checks an entry before the addition that
   uses it (`&&` short-circuits), so the checker cannot overflow on arbitrary input. This is
   read off the code; `CheckSiteFits` assumes it.
-- The `Bounded` precondition of `reference` and `run` (and of `sorted_lookup`). **It is not
-  checked at runtime.** The generated `.mli` documents it, and the difftest asserts (through the
+- The `Bounded` precondition of the generated `reference` when it is called directly, and of
+  `sorted_lookup`, which does no arithmetic. **It is not checked at runtime.** `running_sum`'s
+  `run` no longer needs it: its fallback checks its own domain. The generated `.mli` documents it, and the difftest asserts (through the
   oracle) that every generated input is inside it. The wrapper path (`of_list`, `push`,
   `total`) no longer needs it: the invariant carries the bounds.
 - Coverage of arithmetic sites by `Fits` theorems. The generator counts the sites per function
   and prints them in the header, but matching each site to a theorem is done by review.
+
+## `run`: the fallback checks its own domain
+
+With the bounds inside the invariant, the checker also fails on out-of-range input, which is
+where `reference` can overflow. So `running_sum`'s `run` is three-way:
+
+```lean
+def run (s : List Entry) : Option Int :=
+  if checkInvariant s then some (plan s)            -- consistent and in range: O(1)
+  else if checkBounded s then some (reference s)    -- stale cache, safe to recompute
+  else none                                         -- outside the supported domain
+```
+
+- `checkBounded` checks at most 1000 entries (an `Int` counter, since the subset has no `Nat`)
+  and every |x| ≤ 10^12. `reference` never reads `cum`, so a stale `cum`, even `max_int`, is
+  still recomputed.
+- `none` means "outside the supported domain", not "invalid": Lean has the total, but the
+  generated code can't compute it safely.
+- Proved: `run_sound` (any value returned is the reference total) and `run_complete` (never
+  `none` on a `Bounded` input), plus bounds for the fallback and the counter.
+- Tested (`test/run_domain.ml`) against Lean's `run`: valid lists, stale caches in the domain
+  (expect the reference value), and out-of-domain inputs (expect `none`). The out-of-domain
+  inputs include |x| = 10^12 + 1, stale lists of 1001–1010 entries,
+  `[{x=10^12; cum=5}; {x=max_int; cum=0}]`, and exact `min_int`/`max_int`.
+- Mutations:
+  - **Guard removed.** Deleting the `checkBounded` branch outright doesn't compile, because
+    `check_bounded` becomes unused and the dev profile makes that an error. Made always-true
+    instead (`check_bounded s || true`), the test fails, and on the `max_int` example `run`
+    returns `some -4611685018427387905` (overflow) where Lean says `none`.
+  - **Branch bodies swapped** (plan and reference): fails on stale caches.
+  - **`in_range` always true:** fails.
+  - **Whole branches swapped** (condition and body): passes. That's expected, because it's
+    semantically equivalent: both branches return the reference value whenever they fire. Only
+    the benchmark could see it, since it runs O(n) where O(1) was possible.
+
+The generator needed no change. The harness's `Subject.run` now returns `output option`.
+
+The benchmark tables below were measured before this change. `run` now also allocates a
+`Some` per call.
 
 ## Integer bounds: Lean `Int` vs. OCaml `int`
 
@@ -145,7 +193,7 @@ Lean `Int` is unbounded. OCaml `int` is 63-bit: `[-2^62, 2^62-1]`. The approach:
   `BoundedTail`, so every recursive call stays in the domain. For example, `reference_fits`
   proves |reference s| ≤ 10^12 · length ≤ 10^15.
 - The generator prints the site inventory in the header
-  (`reference: 1, check_from: 1, push: 1`), which makes a missed site visible in review.
+  (`reference: 1, check_from: 1, check_bounded_from: 1, push: 1`), which makes a missed site visible in review.
 - The generator rejects `Nat` (truncated subtraction), `/` and `%` (Lean's `Int` division is
   Euclidean, OCaml's truncates), and literals that don't fit.
 
@@ -279,6 +327,19 @@ One finding from the benchmark: the first `running_sum` checker, written as
 `checkInvariant (e' :: t)`, rebuilt a list cell on every step (3 words/entry in the generated
 OCaml). The fix was a change to the Lean source (`checkFrom e t`), followed by re-proving and
 regenerating. The drift check failed until `gen/` was regenerated.
+
+## Notes for the next formal-spec skill revision
+
+- Compare against a hand-written baseline, not only the naive reference.
+- Fold value bounds into the invariant. Write range checks as two comparisons
+  (`-B <= x && x <= B`), never `abs`, because `abs min_int = min_int`.
+- Range-check before arithmetic (`&&` short-circuit order), and say that the order is read off
+  the code, not proved.
+- Test the exact extremes (`min_int`, `max_int`) in both directions. Run the `abs` mutation
+  once to confirm the tests catch it.
+- `run`'s fallback must be guarded by its own domain check.
+- Stateful examples need their own sequence tests and workflow benchmarks. Input → output
+  harnesses can't express operation sequences.
 
 ## Tool versions
 

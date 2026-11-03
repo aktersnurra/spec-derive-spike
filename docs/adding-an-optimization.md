@@ -28,7 +28,7 @@ In `namespace <Ns>`, write only generator-subset code (see the docstring at the 
 | `reference`      | obviously correct, slow                                     |
 | `checkInvariant` | `Bool` checker for the invariant                            |
 | `plan`           | the optimized version, correct only under the invariant     |
-| `run`            | `if checkInvariant s then plan .. else reference ..`        |
+| `run`            | `if checkInvariant s then plan .. else reference ..`, or three-way (see below) |
 
 Helpers and `structure`s in the same namespace are emitted automatically when used.
 Docstrings on the four become the `.mli` doc comments.
@@ -39,7 +39,12 @@ Then add the statements as `def Name : Prop := ...` (statements and proofs are k
   right, e.g. `List.Pairwise`)
 - `PlanCorrect : ∀ inputs, Invariant s → plan .. = reference ..`
 - `CheckSound`, `CheckComplete` (the Bool checker vs. `Invariant`)
-- `RunCorrect : ∀ inputs, run .. = reference ..`
+- `RunCorrect : ∀ inputs, run .. = reference ..`. If `reference` can overflow on inputs the
+  checker rejects (as with `running_sum`, once the bounds are in the invariant), `run`'s
+  fallback must be guarded by its own domain check. Make `run` return `Option`:
+  `some plan` / `some reference` when a fallback domain check passes / `none`, where `none` means
+  outside the supported domain. Then prove `RunSound` (never wrong) and `RunComplete` (never
+  `none` on `Bounded` input) instead.
 - `Bounded` (the input domain of the OCaml code, with a `Decidable` instance) and one
   `Fits` theorem statement per Int arithmetic site. Run step 3 first if unsure: the generated
   header lists the sites per function. With no sites, `Bounded` only has to make the inputs

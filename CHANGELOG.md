@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-03: run's fallback guarded by its own domain check
+- `RunningSum.run : List Entry → Option Int`: plan, else `reference` if `checkBounded`
+  (≤ 1000 entries via an `Int` counter, |x| ≤ 10^12), else `none` (outside the supported
+  domain). `RunCorrect` replaced by `RunSound` / `RunComplete`; new `CheckBoundedSound`,
+  `FallbackDomainTail`, `FallbackFits`, `CounterFits`.
+- Harness `Subject.run` returns `output option`; new oracle mode `running_sum_run` and
+  run-domain differential test, including the `max_int` example and exact extremes.
+- Exact `min_int`/`max_int` in the of_list and push tests; `abs`-mutation check.
+
 ## 2026-11-03: bounds in the invariant; fair baseline
 - `RunningSum.Invariant` is now cache consistency and value bounds; the checker range-checks
   each entry before using it in arithmetic, so the wrapper path needs no unchecked
