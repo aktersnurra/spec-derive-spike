@@ -86,4 +86,77 @@ theorem check_site_fits : CheckSiteFits := by
   have h2 := hm e' (List.mem_cons_of_mem _ (List.mem_cons_self ..))
   omega
 
+/-! ## Keeping the invariant by construction: `push` -/
+
+theorem push_eq_some {x : Int} {s s' : List Entry} (h : push x s = some s') :
+    -1000000000000 ≤ x ∧ x ≤ 1000000000000 ∧
+    -1000000000000000 ≤ x + plan s ∧ x + plan s ≤ 1000000000000000 ∧
+    s' = { x, cum := x + plan s } :: s := by
+  unfold push at h
+  split at h
+  · cases h
+  · dsimp only at h
+    split at h
+    · cases h
+    · cases h
+      refine ⟨by omega, by omega, by omega, by omega, rfl⟩
+
+theorem push_preserves : PushPreserves := by
+  unfold PushPreserves
+  intro x s s' hs h
+  obtain ⟨-, -, -, -, rfl⟩ := push_eq_some h
+  refine ⟨?_, hs⟩
+  simp only [reference]
+  rw [plan_correct s hs]
+
+theorem push_tail : PushTail := by
+  unfold PushTail
+  intro x s s' h
+  obtain ⟨-, -, -, -, rfl⟩ := push_eq_some h
+  rfl
+
+theorem push_reference : PushReference := by
+  unfold PushReference
+  intro x s s' h
+  obtain ⟨-, -, -, -, rfl⟩ := push_eq_some h
+  rfl
+
+theorem push_total : PushTotal := by
+  unfold PushTotal
+  intro x s s' hs h
+  obtain ⟨-, -, -, -, rfl⟩ := push_eq_some h
+  show x + plan s = x + reference s
+  rw [plan_correct s hs]
+
+theorem plan_values_bounded (s : List Entry) (hs : ValuesBounded s) :
+    -1000000000000000 ≤ plan s ∧ plan s ≤ 1000000000000000 := by
+  cases s with
+  | nil => simp [plan]
+  | cons e t =>
+    have := hs e (List.mem_cons_self ..)
+    simp only [plan]
+    omega
+
+theorem push_values_bounded : PushValuesBounded := by
+  unfold PushValuesBounded ValuesBounded
+  intro x s s' hs h
+  obtain ⟨h1, h2, h3, h4, rfl⟩ := push_eq_some h
+  intro e he
+  rcases List.mem_cons.mp he with rfl | he
+  · exact ⟨h1, h2, h3, h4⟩
+  · exact hs e he
+
+theorem push_site_fits : PushSiteFits := by
+  unfold PushSiteFits Fits minInt maxInt
+  intro x s hs h1 h2
+  have := plan_values_bounded s hs
+  omega
+
+theorem reference_fits_inv : ReferenceFitsInv := by
+  unfold ReferenceFitsInv Fits minInt maxInt
+  intro s hinv hs
+  have := plan_values_bounded s hs
+  rw [← plan_correct s hinv]
+  omega
+
 end RunningSum
