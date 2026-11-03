@@ -11,14 +11,15 @@ It is ordinary text generation: Lean `Expr` → a small OCaml AST (`OExpr`) → 
 
 ## Supported subset (anything else is rejected with an error naming the definition)
 
-* Types: `Int` (→ `int`), `Bool` (→ `bool`), `List T` (→ `T list`), and monomorphic
+* Types: `Int` (→ `int`), `Bool` (→ `bool`), `List T` (→ `T list`), `Option T`
+  (→ `T option`; constructors only, no `Option` patterns), and monomorphic
   `structure`s declared in the example's namespace (→ OCaml records).
 * Definitions: plain, safe, monomorphic `def`s in the example's namespace, fully applied.
   Recursion must be structural and non-mutual (→ `let rec`). No `partial`, `unsafe`,
   well-founded recursion, `implemented_by`, `@[extern]`, lambdas or higher-order code.
 * Terms: variables, `let`, Int literals that fit in an OCaml int, `+ - *` and unary `-` on
   `Int`, `==`/`!=` on `Int`/`Bool`, `&&`, `||`, `!`, `true`, `false`, `[]`, `::`,
-  structure constructors and field projections, `if c then a else b` where `c` is a `Bool`
+  `none`, `some`, structure constructors and field projections, `if c then a else b` where `c` is a `Bool`
   or a proposition built from `= ≠ < ≤ > ≥` on `Int`, `= ≠` on `Bool`, `¬ ∧ ∨ True False`,
   and `match` on the above with constructor / variable / wildcard patterns.
 * Every operator instance must be definitionally equal to the standard one, so `+` really
@@ -60,6 +61,8 @@ inductive OExpr where
   | record (fields : List (String × OExpr))
   | nil
   | cons (h t : OExpr)
+  | none
+  | some (a : OExpr)
   deriving Inhabited
 
 def opPrec : String → Nat
@@ -71,11 +74,11 @@ def opPrec : String → Nat
 
 /-- Precedence: 10 atom, 9 field, 8 application, 7 unary minus, 6..1 binary, 0 open-ended. -/
 def OExpr.prec : OExpr → Nat
-  | .var _ | .bool _ | .record _ | .nil => 10
+  | .var _ | .bool _ | .record _ | .nil | .none => 10
   | .int v => if v < 0 then 7 else 10
   | .field .. => 9
   | .app _ [] => 10
-  | .app .. | .not _ => 8
+  | .app .. | .not _ | .some _ => 8
   | .neg _ => 7
   | .binop op .. => opPrec op
   | .cons .. => 4
@@ -106,6 +109,8 @@ partial def ppRaw (ind : Nat) : OExpr → String
   | .int v => toString v
   | .bool b => toString b
   | .nil => "[]"
+  | .none => "None"
+  | .some a => "Some " ++ pp ind 9 a
   | .app f [] => f
   | .app f args => f ++ " " ++ " ".intercalate (args.map (pp ind 9))
   | .not a => "not " ++ pp ind 9 a
@@ -227,6 +232,7 @@ partial def trType (t : Expr) : TrM String := do
   | .const ``Int [], #[] => return "int"
   | .const ``Bool [], #[] => return "bool"
   | .const ``List _, #[a] => return s!"{← trType a} list"
+  | .const ``Option _, #[a] => return s!"{← trType a} option"
   | .const c [], #[] =>
     if ← isUserStruct c then
       registerStruct c
@@ -287,6 +293,8 @@ partial def trApp (e : Expr) : TrM OExpr := do
   match c, args.size with
   | ``List.nil, 1 => return .nil
   | ``List.cons, 3 => return .cons (← trExpr args[1]!) (← trExpr args[2]!)
+  | ``Option.none, 1 => return .none
+  | ``Option.some, 2 => return .some (← trExpr args[1]!)
   | ``Bool.true, 0 => return .bool true
   | ``Bool.false, 0 => return .bool false
   | ``OfNat.ofNat, 3 =>
@@ -511,7 +519,7 @@ def emitExample (ns : Name) : MetaM (String × String) := do
 
 /-- Registered examples: OCaml file stem and Lean namespace. -/
 def examples : List (String × Name) :=
-  [("running_sum", `RunningSum)]
+  [("running_sum", `RunningSum), ("sorted_lookup", `SortedLookup)]
 
 unsafe def runMeta (act : MetaM α) : IO α := do
   initSearchPath (← findSysroot)
