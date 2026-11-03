@@ -3,6 +3,8 @@ defaultTargets = ["SpecDerive", "emit", "oracle"]
 
 [[lean_lib]]
 name = "SpecDerive"
+# Build specs, proofs and the proof-gate check file; the root module imports only specs.
+globs = ["SpecDerive", "SpecDerive.+"]
 
 [[lean_exe]]
 name = "emit"
